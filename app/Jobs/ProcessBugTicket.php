@@ -125,10 +125,25 @@ class ProcessBugTicket implements ShouldQueue
         $raw = preg_replace('/^```(?:json)?\s*/i', '', trim($raw));
         $raw = preg_replace('/\s*```$/', '', $raw);
 
+        // ── Sanitize control characters ─────────────────────────────────────
+        // Claude sometimes puts literal newlines/tabs inside JSON string values
+        // instead of \n / \t escape sequences, which breaks json_decode.
+        // We fix this by replacing raw control characters inside JSON strings.
+        $raw = $this->sanitizeJsonString($raw);
+
         $decoded = json_decode($raw, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new \RuntimeException('Claude returned invalid JSON: ' . json_last_error_msg() . '. Raw: ' . substr($raw, 0, 500));
+            // Last resort: try stripping ALL non-printable characters and retry
+            $cleaned = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $raw);
+            $decoded  = json_decode($cleaned, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \RuntimeException(
+                    'Claude returned invalid JSON: ' . json_last_error_msg()
+                    . '. Raw (first 500 chars): ' . substr($raw, 0, 500)
+                );
+            }
         }
 
         return $decoded;
@@ -558,6 +573,70 @@ class ProcessBugTicket implements ShouldQueue
             'webp'        => 'image/webp',
             default       => 'image/png',
         };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // JSON sanitizer
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Fix raw control characters inside JSON string values.
+     *
+     * Claude sometimes embeds literal newlines, carriage returns, or tabs
+     * directly inside string values instead of using \n / \r / \t — this
+     * makes json_decode throw a "Control character error".
+     *
+     * We use a state machine to scan character by character:
+     * - Inside a JSON string → escape raw control characters
+     * - Outside a string    → leave whitespace alone (it's structural)
+     */
+    private function sanitizeJsonString(string $json): string
+    {
+        $result   = '';
+        $inString = false;
+        $len      = strlen($json);
+
+        for ($i = 0; $i < $len; $i++) {
+            $char = $json[$i];
+
+            if ($inString) {
+                if ($char === '\\' && $i + 1 < $len) {
+                    // Pass through any existing escape sequence untouched
+                    $result .= $char . $json[$i + 1];
+                    $i++;
+                    continue;
+                }
+
+                if ($char === '"') {
+                    // End of string
+                    $inString = false;
+                    $result  .= $char;
+                    continue;
+                }
+
+                // Replace raw control characters with proper JSON escape sequences
+                $ord = ord($char);
+                if ($ord < 0x20) {
+                    $result .= match($char) {
+                        "\n" => '\\n',
+                        "\r" => '\\r',
+                        "\t" => '\\t',
+                        default => sprintf('\\u%04x', $ord),
+                    };
+                    continue;
+                }
+
+                $result .= $char;
+
+            } else {
+                if ($char === '"') {
+                    $inString = true;
+                }
+                $result .= $char;
+            }
+        }
+
+        return $result;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
