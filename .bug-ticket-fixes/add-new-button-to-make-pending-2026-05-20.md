@@ -3,140 +3,144 @@
 **Ticket:** #7 — Add new button to make pending
 
 ## Analysis
-1) The Blade view is using a constrained container (like 'container' or 'max-w-*') instead of 'container-fluid' or 'w-full' to make it full width. 2) The actions column only conditionally shows 'Approve' for pending tickets but has no 'Pending' button for fixed/approved tickets.
+1) The Blade view is using a centered container class (like container or max-w-*) instead of full-width layout. 2) The actions column only renders an 'Approve' button for 'Pending' status but does not render a 'Make Pending' button for 'Fixed' or 'Approved' status tickets.
 
 ## Fix Strategy
-1) Update the Blade view to use full-width layout by replacing container with container-fluid or w-full. 2) Add a 'Pending' button/route/controller method to allow reverting ticket status back to pending. 3) Add the route, controller method, and blade button for the new 'Make Pending' action.
+1) Change the wrapping container in the Blade view from a centered/max-width container to a full-width container (w-full or container-fluid). 2) Add a 'Make Pending' button/form in the actions column that appears when a ticket status is not 'Pending', which posts to a new route that updates the ticket status back to 'pending'. 3) Add the corresponding route and controller method.
 
 ## File to Change
 `resources/views/bug-tickets/index.blade.php`
 
 ## Before
 ```php
-<div class="container py-5">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>🐛 Bug Tickets</h2>
-        <a href="{{ route('bug-tickets.create') }}" class="btn btn-primary">+ New Ticket</a>
+<div class="container mx-auto py-8">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold flex items-center gap-2">🐛 Bug Tickets</h1>
+        <a href="{{ route('bug-tickets.create') }}" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">+ New Ticket</a>
     </div>
-    <div class="card">
-        <div class="card-body">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>TITLE</th>
-                        <th>MODULE</th>
-                        <th>PRIORITY</th>
-                        <th>LARAVEL</th>
-                        <th>STATUS</th>
-                        <th>CREATED</th>
-                        <th>ACTIONS</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach($tickets as $ticket)
-                    <tr>
-                        <td>{{ $ticket->id }}</td>
-                        <td>{{ $ticket->title }}</td>
-                        <td>{{ $ticket->module }}</td>
-                        <td><span class="badge bg-danger">{{ $ticket->priority }}</span></td>
-                        <td>{{ $ticket->laravel_version }}</td>
-                        <td>
-                            <span class="badge {{ $ticket->status === 'Fixed' ? 'bg-success' : 'bg-warning text-dark' }}">
-                                {{ $ticket->status }}
-                            </span>
-                        </td>
-                        <td>{{ $ticket->created_at->diffForHumans() }}</td>
-                        <td>
-                            <a href="{{ route('bug-tickets.show', $ticket) }}" class="text-primary">View</a>
-                            @if($ticket->status === 'Pending')
-                                <a href="{{ route('bug-tickets.approve', $ticket) }}" class="text-success">Approve</a>
-                            @endif
-                            <a href="{{ route('bug-tickets.destroy', $ticket) }}" class="text-danger"
-                               onclick="event.preventDefault(); document.getElementById('delete-{{ $ticket->id }}').submit();">Delete</a>
-                            <form id="delete-{{ $ticket->id }}" action="{{ route('bug-tickets.destroy', $ticket) }}" method="POST" style="display:none;">
-                                @csrf @method('DELETE')
+    <div class="bg-white rounded-lg shadow p-4">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-gray-500 uppercase text-xs border-b">
+                    <th class="py-2 px-2">#</th>
+                    <th class="py-2 px-2">Title</th>
+                    <th class="py-2 px-2">Module</th>
+                    <th class="py-2 px-2">Priority</th>
+                    <th class="py-2 px-2">Laravel</th>
+                    <th class="py-2 px-2">Status</th>
+                    <th class="py-2 px-2">Created</th>
+                    <th class="py-2 px-2">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach($tickets as $ticket)
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="py-2 px-2">{{ $ticket->id }}</td>
+                    <td class="py-2 px-2 font-medium">{{ $ticket->title }}</td>
+                    <td class="py-2 px-2">{{ $ticket->module }}</td>
+                    <td class="py-2 px-2">
+                        <span class="bg-red-100 text-red-600 px-2 py-1 rounded-full text-xs">{{ $ticket->priority }}</span>
+                    </td>
+                    <td class="py-2 px-2">{{ $ticket->laravel_version }}</td>
+                    <td class="py-2 px-2">
+                        @if($ticket->status === 'Fixed')
+                            <span class="bg-green-100 text-green-600 px-2 py-1 rounded-full text-xs">Fixed</span>
+                        @else
+                            <span class="bg-yellow-100 text-yellow-600 px-2 py-1 rounded-full text-xs">Pending</span>
+                        @endif
+                    </td>
+                    <td class="py-2 px-2 text-gray-500">{{ $ticket->created_at->diffForHumans() }}</td>
+                    <td class="py-2 px-2 flex gap-2">
+                        <a href="{{ route('bug-tickets.show', $ticket) }}" class="text-blue-500 hover:underline">View</a>
+                        @if($ticket->status === 'Pending')
+                            <form action="{{ route('bug-tickets.approve', $ticket) }}" method="POST" class="inline">
+                                @csrf
+                                @method('PATCH')
+                                <button type="submit" class="text-green-500 hover:underline">Approve</button>
                             </form>
-                        </td>
-                    </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        </div>
+                        @endif
+                        <form action="{{ route('bug-tickets.destroy', $ticket) }}" method="POST" class="inline">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit" class="text-red-500 hover:underline">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                @endforeach
+            </tbody>
+        </table>
     </div>
 </div>
 ```
 
 ## After
 ```php
-<div class="container-fluid px-4 py-4" style="width: 100%;">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>🐛 Bug Tickets</h2>
-        <a href="{{ route('bug-tickets.create') }}" class="btn btn-primary">+ New Ticket</a>
+<div class="w-full px-6 py-8">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold flex items-center gap-2">🐛 Bug Tickets</h1>
+        <a href="{{ route('bug-tickets.create') }}" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">+ New Ticket</a>
     </div>
-    <div class="card w-100">
-        <div class="card-body">
-            <table class="table table-hover w-100">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>TITLE</th>
-                        <th>MODULE</th>
-                        <th>PRIORITY</th>
-                        <th>LARAVEL</th>
-                        <th>STATUS</th>
-                        <th>CREATED</th>
-                        <th>ACTIONS</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach($tickets as $ticket)
-                    <tr>
-                        <td>{{ $ticket->id }}</td>
-                        <td>{{ $ticket->title }}</td>
-                        <td>{{ $ticket->module }}</td>
-                        <td>
-                            <span class="badge bg-danger">{{ $ticket->priority }}</span>
-                        </td>
-                        <td>{{ $ticket->laravel_version }}</td>
-                        <td>
-                            <span class="badge
-                                @if($ticket->status === 'Fixed') bg-success
-                                @elseif($ticket->status === 'Approved') bg-info
-                                @else bg-warning text-dark
-                                @endif">
-                                {{ $ticket->status }}
-                            </span>
-                        </td>
-                        <td>{{ $ticket->created_at->diffForHumans() }}</td>
-                        <td>
-                            <a href="{{ route('bug-tickets.show', $ticket) }}" class="text-primary me-1">View</a>
+    <div class="bg-white rounded-lg shadow p-4 w-full">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-gray-500 uppercase text-xs border-b">
+                    <th class="py-2 px-2">#</th>
+                    <th class="py-2 px-2">Title</th>
+                    <th class="py-2 px-2">Module</th>
+                    <th class="py-2 px-2">Priority</th>
+                    <th class="py-2 px-2">Laravel</th>
+                    <th class="py-2 px-2">Status</th>
+                    <th class="py-2 px-2">Created</th>
+                    <th class="py-2 px-2">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach($tickets as $ticket)
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="py-2 px-2">{{ $ticket->id }}</td>
+                    <td class="py-2 px-2 font-medium">{{ $ticket->title }}</td>
+                    <td class="py-2 px-2">{{ $ticket->module }}</td>
+                    <td class="py-2 px-2">
+                        <span class="bg-red-100 text-red-600 px-2 py-1 rounded-full text-xs">{{ $ticket->priority }}</span>
+                    </td>
+                    <td class="py-2 px-2">{{ $ticket->laravel_version }}</td>
+                    <td class="py-2 px-2">
+                        @if($ticket->status === 'Fixed' || $ticket->status === 'Approved')
+                            <span class="bg-green-100 text-green-600 px-2 py-1 rounded-full text-xs">{{ $ticket->status }}</span>
+                        @else
+                            <span class="bg-yellow-100 text-yellow-600 px-2 py-1 rounded-full text-xs">Pending</span>
+                        @endif
+                    </td>
+                    <td class="py-2 px-2 text-gray-500">{{ $ticket->created_at->diffForHumans() }}</td>
+                    <td class="py-2 px-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <a href="{{ route('bug-tickets.show', $ticket) }}" class="text-blue-500 hover:underline">View</a>
 
                             @if($ticket->status === 'Pending')
-                                <form action="{{ route('bug-tickets.approve', $ticket) }}" method="POST" style="display:inline;">
-                                    @csrf @method('PATCH')
-                                    <button type="submit" class="btn btn-link text-success p-0 me-1">Approve</button>
+                                <form action="{{ route('bug-tickets.approve', $ticket) }}" method="POST" class="inline">
+                                    @csrf
+                                    @method('PATCH')
+                                    <button type="submit" class="text-green-500 hover:underline">Approve</button>
+                                </form>
+                            @else
+                                <form action="{{ route('bug-tickets.make-pending', $ticket) }}" method="POST" class="inline">
+                                    @csrf
+                                    @method('PATCH')
+                                    <button type="submit" class="text-yellow-500 hover:underline">Make Pending</button>
                                 </form>
                             @endif
 
-                            @if(in_array($ticket->status, ['Approved', 'Fixed']))
-                                <form action="{{ route('bug-tickets.pending', $ticket) }}" method="POST" style="display:inline;">
-                                    @csrf @method('PATCH')
-                                    <button type="submit" class="btn btn-link text-warning p-0 me-1">Pending</button>
-                                </form>
-                            @endif
-
-                            <form id="delete-{{ $ticket->id }}" action="{{ route('bug-tickets.destroy', $ticket) }}" method="POST" style="display:inline;">
-                                @csrf @method('DELETE')
-                                <button type="submit" class="btn btn-link text-danger p-0"
-                                    onclick="return confirm('Are you sure you want to delete this ticket?')">Delete</button>
+                            <form action="{{ route('bug-tickets.destroy', $ticket) }}" method="POST" class="inline">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="text-red-500 hover:underline">Delete</button>
                             </form>
-                        </td>
-                    </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        </div>
+                        </div>
+                    </td>
+                </tr>
+                @endforeach
+            </tbody>
+        </table>
     </div>
 </div>
 ```
