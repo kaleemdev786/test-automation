@@ -220,7 +220,14 @@
         {{-- Status badges --}}
         <div class="flex flex-wrap gap-2 mb-4">
             <span class="px-2 py-1 rounded text-xs font-semibold {{ $gr['file_patched'] ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700' }}">
-                {{ $gr['file_patched'] ? '✅ File patched' : '⚠️ Fix notes committed' }}
+                @if($gr['file_patched'])
+                    ✅ File patched
+                    @if(!empty($gr['patch_strategy']))
+                        <span class="text-green-500">({{ $gr['patch_strategy'] }})</span>
+                    @endif
+                @else
+                    ⚠️ Fix notes committed
+                @endif
             </span>
             <span class="px-2 py-1 rounded text-xs font-semibold {{ $gr['pushed'] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' }}">
                 {{ $gr['pushed'] ? '✅ Branch pushed' : '❌ Push failed' }}
