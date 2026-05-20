@@ -193,29 +193,40 @@ class ProcessBugTicket implements ShouldQueue
         $result['log'][] = $this->git($repoPath, ['checkout', '-b', $branch])['output'];
 
         // ── Apply the code fix to disk ──────────────────────────────────────
-        if ($filePath && $before && $after) {
+        if ($filePath && $after) {
             $absoluteFile = $repoPath . DIRECTORY_SEPARATOR . ltrim(
                 str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $filePath),
                 DIRECTORY_SEPARATOR
             );
 
             if (file_exists($absoluteFile)) {
-                $content = file_get_contents($absoluteFile);
+                $originalContent = file_get_contents($absoluteFile);
+                $patchResult     = $this->applySmartPatch($originalContent, $before ?? '', $after);
 
-                if (str_contains($content, $before)) {
-                    file_put_contents($absoluteFile, str_replace($before, $after, $content));
-                    $result['file_patched'] = true;
-                    $result['patched_file'] = $filePath;
-                    $result['log'][] = "✅ Patched: $filePath";
+                if ($patchResult['success']) {
+                    file_put_contents($absoluteFile, $patchResult['content']);
+                    $result['file_patched']   = true;
+                    $result['patched_file']   = $filePath;
+                    $result['patch_strategy'] = $patchResult['strategy'];
+                    $result['log'][] = "✅ Patched [{$patchResult['strategy']}]: $filePath";
                 } else {
+                    // Patch failed — write the "after" as a separate fix file for manual review
                     $result['skipped_patch'] = true;
-                    $result['log'][] = "⚠️ Before-block not found verbatim in $filePath — committing fix notes.";
+                    $result['log'][] = "⚠️ Auto-patch failed for $filePath (before-block not matched). Fix notes committed.";
+                    $result['log'][] = "   Reason: " . $patchResult['reason'];
                     $this->writeFixNoteFile($repoPath, $branch, $fix);
                 }
             } else {
-                $result['skipped_patch'] = true;
-                $result['log'][] = "⚠️ File not found: $absoluteFile — committing fix notes.";
-                $this->writeFixNoteFile($repoPath, $branch, $fix);
+                // File doesn't exist yet — write it fresh with the "after" content
+                $dir = dirname($absoluteFile);
+                if (! is_dir($dir)) {
+                    mkdir($dir, 0755, true);
+                }
+                file_put_contents($absoluteFile, $after);
+                $result['file_patched']   = true;
+                $result['patched_file']   = $filePath;
+                $result['patch_strategy'] = 'new-file';
+                $result['log'][] = "✅ Created new file: $filePath";
             }
         } else {
             $result['skipped_patch'] = true;
@@ -361,6 +372,130 @@ class ProcessBugTicket implements ShouldQueue
             $this->git($repoPath, ['remote', 'set-url', $remote, $authenticated], failOk: true);
             Log::info('BugTicket: remote URL configured with token auth');
         }
+    }
+
+    /**
+     * Try to apply the before→after patch using multiple strategies.
+     *
+     * Claude generates "before" from a screenshot, so it never matches verbatim.
+     * We try progressively looser matching until one works.
+     *
+     * @return array{success: bool, content: string, strategy: string, reason: string}
+     */
+    private function applySmartPatch(string $fileContent, string $before, string $after): array
+    {
+        // ── Strategy 1: Exact match ─────────────────────────────────────────
+        if ($before && str_contains($fileContent, $before)) {
+            return [
+                'success'  => true,
+                'content'  => str_replace($before, $after, $fileContent),
+                'strategy' => 'exact',
+                'reason'   => '',
+            ];
+        }
+
+        // ── Strategy 2: Normalize line endings (\r\n → \n) ─────────────────
+        $normFile   = str_replace("\r\n", "\n", $fileContent);
+        $normBefore = str_replace("\r\n", "\n", $before);
+        $normAfter  = str_replace("\r\n", "\n", $after);
+
+        if ($before && str_contains($normFile, $normBefore)) {
+            return [
+                'success'  => true,
+                'content'  => str_replace($normBefore, $normAfter, $normFile),
+                'strategy' => 'normalize-endings',
+                'reason'   => '',
+            ];
+        }
+
+        // ── Strategy 3: Trim trailing whitespace on each line ───────────────
+        $trimLines = fn(string $s) => implode("\n",
+            array_map('rtrim', explode("\n", str_replace("\r\n", "\n", $s)))
+        );
+
+        $trimmedFile   = $trimLines($fileContent);
+        $trimmedBefore = $trimLines($before);
+        $trimmedAfter  = $trimLines($after);
+
+        if ($before && str_contains($trimmedFile, $trimmedBefore)) {
+            return [
+                'success'  => true,
+                'content'  => str_replace($trimmedBefore, $trimmedAfter, $trimmedFile),
+                'strategy' => 'trim-whitespace',
+                'reason'   => '',
+            ];
+        }
+
+        // ── Strategy 4: Ignore indentation (strip leading spaces/tabs) ──────
+        $stripIndent = fn(string $s) => implode("\n",
+            array_map('ltrim', explode("\n", str_replace("\r\n", "\n", $s)))
+        );
+
+        $strippedFile   = $stripIndent($fileContent);
+        $strippedBefore = $stripIndent($before);
+
+        if ($before && str_contains($strippedFile, $strippedBefore)) {
+            // Re-apply using the trimmed versions since indentation is gone
+            $strippedAfter = $stripIndent($after);
+            $patchedStripped = str_replace($strippedBefore, $strippedAfter, $strippedFile);
+
+            // Preserve original file's indentation style by applying to trimmed file
+            $patchedTrimmed = str_replace($trimmedBefore, $trimmedAfter, $trimmedFile);
+            return [
+                'success'  => true,
+                'content'  => str_contains($trimmedFile, $trimmedBefore) ? $patchedTrimmed : $patchedStripped,
+                'strategy' => 'ignore-indentation',
+                'reason'   => '',
+            ];
+        }
+
+        // ── Strategy 5: Line-by-line similarity (≥80% lines must match) ─────
+        if ($before) {
+            $beforeLines = array_filter(array_map('trim', explode("\n", $normBefore)));
+            $fileLines   = array_map('trim', explode("\n", $normFile));
+
+            $matchCount = 0;
+            foreach ($beforeLines as $bLine) {
+                if ($bLine !== '' && in_array($bLine, $fileLines, true)) {
+                    $matchCount++;
+                }
+            }
+
+            $matchRatio = count($beforeLines) > 0
+                ? $matchCount / count($beforeLines)
+                : 0;
+
+            Log::info('BugTicket patch similarity', [
+                'ticket'      => $this->ticket->id,
+                'match_ratio' => $matchRatio,
+                'matched'     => $matchCount,
+                'total'       => count($beforeLines),
+            ]);
+
+            if ($matchRatio >= 0.8) {
+                // High enough similarity — append the after code as a comment block
+                // so developer can apply it manually with full context
+                $afterBlock = "\n\n/* ── BUG TICKET BOT FIX (apply manually) ──\n"
+                    . "   Ticket #{$this->ticket->id} | Similarity: " . round($matchRatio * 100) . "%\n"
+                    . "   " . str_replace("\n", "\n   ", $normAfter) . "\n*/\n";
+
+                return [
+                    'success'  => true,
+                    'content'  => $normFile . $afterBlock,
+                    'strategy' => 'similarity-comment',
+                    'reason'   => '',
+                ];
+            }
+        }
+
+        // ── All strategies failed ───────────────────────────────────────────
+        return [
+            'success'  => false,
+            'content'  => $fileContent,
+            'strategy' => 'none',
+            'reason'   => "Before-block did not match with any strategy. "
+                        . "Before (first 100 chars): " . substr(trim($before), 0, 100),
+        ];
     }
 
     private function writeFixNoteFile(string $repoPath, string $branch, array $fix): void
