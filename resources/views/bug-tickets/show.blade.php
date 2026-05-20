@@ -225,19 +225,33 @@
             <span class="px-2 py-1 rounded text-xs font-semibold {{ $gr['pushed'] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' }}">
                 {{ $gr['pushed'] ? '✅ Branch pushed' : '❌ Push failed' }}
             </span>
+            @if(!empty($gr['pr_number']))
+            <span class="px-2 py-1 rounded text-xs font-semibold bg-purple-100 text-purple-700">
+                🔀 PR #{{ $gr['pr_number'] }} created
+            </span>
+            @endif
             <span class="px-2 py-1 rounded text-xs font-semibold {{ $gr['merged'] ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500' }}">
-                {{ $gr['merged'] ? '✅ Merged → ' . $gr['base_branch'] : '— Not merged' }}
+                {{ $gr['merged'] ? '✅ Merged → ' . $gr['base_branch'] : '— Not merged yet' }}
             </span>
         </div>
+
+        {{-- PR link --}}
+        @if(!empty($gr['pr_url']))
+        <a href="{{ $gr['pr_url'] }}" target="_blank"
+           class="inline-flex items-center gap-2 bg-gray-900 hover:bg-gray-700 text-white text-xs font-semibold px-4 py-2 rounded-lg mb-4 transition">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16"><path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z"/></svg>
+            View Pull Request #{{ $gr['pr_number'] }} on GitHub
+        </a>
+        @endif
 
         {{-- Key details --}}
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
             <div>
-                <p class="text-gray-400 text-xs">Branch created</p>
+                <p class="text-gray-400 text-xs">Branch</p>
                 <code class="bg-gray-100 px-2 py-0.5 rounded text-xs">{{ $gr['branch'] ?? '—' }}</code>
             </div>
             <div>
-                <p class="text-gray-400 text-xs">Commit hash</p>
+                <p class="text-gray-400 text-xs">Commit</p>
                 <code class="bg-gray-100 px-2 py-0.5 rounded text-xs">{{ $gr['commit'] ?? '—' }}</code>
             </div>
             <div>
